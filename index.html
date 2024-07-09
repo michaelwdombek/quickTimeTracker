@@ -1,0 +1,185 @@
+<!-- ./index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Tracker</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        form { margin-bottom: 20px; }
+        label { display: inline-block; width: 120px; }
+        input, select { margin-bottom: 10px; }
+        #debug { margin-top: 20px; border: 1px solid #ccc; padding: 10px; white-space: pre-wrap; }
+        .required::after { content: " *"; color: red; }
+        .error { color: red; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h1>Time Tracker</h1>
+    <form id="timeEntryForm">
+        <label for="project" class="required">Project:</label>
+        <select id="project" name="project" required></select><br>
+        <label for="date" class="required">Date:</label>
+        <input type="date" id="date" name="date" required><br>
+        <label for="startTime" class="required">Start Time:</label>
+        <input type="time" id="startTime" name="startTime" required step="60"><br>
+        <label for="endTime" class="required">End Time:</label>
+        <input type="time" id="endTime" name="endTime" required step="60"><br>
+        <label for="break">Break (minutes):</label>
+        <input type="number" id="break" name="break" min="0" value="0"><br>
+        <label for="comment">Comment:</label>
+        <input type="text" id="comment" name="comment"><br>
+        <button type="submit">Submit</button>
+    </form>
+    <div id="message"></div>
+    <div id="error" class="error"></div>
+
+    <h2>Recent Time Entries</h2>
+    <table id="recentEntries">
+        <thead>
+            <tr>
+                <th>Project</th>
+                <th>Date</th>
+                <th>Start Time</th>
+                <th>End Time</th>
+                <th>Hours</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <div id="debug"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const debugElement = document.getElementById('debug');
+            const dateInput = document.getElementById('date');
+            const startTimeInput = document.getElementById('startTime');
+            const endTimeInput = document.getElementById('endTime');
+            const errorElement = document.getElementById('error');
+            const recentEntriesTable = document.getElementById('recentEntries').getElementsByTagName('tbody')[0];
+
+            // Set default value to today's date in yyyy-mm-dd format
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            dateInput.value = `${yyyy}-${mm}-${dd}`;
+
+            // Load projects
+            fetch('/projects')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(projects => {
+                    const projectSelect = document.getElementById('project');
+                    projects.forEach(project => {
+                        const option = document.createElement('option');
+                        option.value = project.project_id;
+                        option.textContent = `${project.project_name} (${project.hours_procured} hours)`;
+                        projectSelect.appendChild(option);
+                    });
+                    debugElement.textContent += "Projects loaded successfully.\n";
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    errorElement.textContent = `Error loading projects: ${error.message}`;
+                    debugElement.textContent += `Error loading projects: ${error}\n`;
+                });
+
+            // Load recent entries
+            function loadRecentEntries() {
+                fetch('/recent_entries')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(entries => {
+                        recentEntriesTable.innerHTML = '';
+                        entries.forEach(entry => {
+                            const row = recentEntriesTable.insertRow();
+                            row.insertCell().textContent = entry.project_name;
+                            row.insertCell().textContent = entry.date;
+                            row.insertCell().textContent = entry.start_time;
+                            row.insertCell().textContent = entry.end_time;
+                            row.insertCell().textContent = entry.hours;
+                        });
+                        debugElement.textContent += "Recent entries loaded successfully.\n";
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        errorElement.textContent = `Error loading recent entries: ${error.message}`;
+                        debugElement.textContent += `Error loading recent entries: ${error}\n`;
+                    });
+            }
+
+            // Load recent entries on page load
+            loadRecentEntries();
+
+            // Validate end time is after start time
+            function validateTimes() {
+                if (startTimeInput.value && endTimeInput.value) {
+                    if (endTimeInput.value <= startTimeInput.value) {
+                        errorElement.textContent = "End time must be after start time.";
+                        return false;
+                    }
+                }
+                errorElement.textContent = "";
+                return true;
+            }
+
+            startTimeInput.addEventListener('change', validateTimes);
+            endTimeInput.addEventListener('change', validateTimes);
+
+            // Handle form submission
+            document.getElementById('timeEntryForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                if (!validateTimes()) {
+                    return;
+                }
+                const formData = new FormData(this);
+
+                // Log form data for debugging
+                debugElement.textContent += "Form data:\n";
+                for (let [key, value] of formData.entries()) {
+                    debugElement.textContent += `${key}: ${value}\n`;
+                }
+
+                fetch('/submit_entry', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    debugElement.textContent += `Response status: ${response.status}\n`;
+                    return response.text();
+                })
+                .then(message => {
+                    document.getElementById('message').textContent = message;
+                    debugElement.textContent += `Server response: ${message}\n`;
+                    if (message === "Time entry submitted successfully!") {
+                        this.reset();
+                        // Reset date to today after successful submission
+                        dateInput.value = `${yyyy}-${mm}-${dd}`;
+                        // Reload recent entries
+                        loadRecentEntries();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('message').textContent = 'An error occurred while submitting the entry.';
+                    debugElement.textContent += `Error: ${error}\n`;
+                });
+            });
+        });
+    </script>
+</body>
+</html>
